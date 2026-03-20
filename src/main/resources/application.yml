@@ -1,0 +1,21 @@
+server:
+  port: ${PORT:3000}
+
+spring:
+  application:
+    name: people-study-springboot-api
+  data:
+    mongodb:
+      uri: ${DATABASE_URL:mongodb://admin:password@localhost:27017/people_db?authSource=admin&replicaSet=rs0}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:your-super-secret-jwt-key-change-in-production}
+    refresh-secret: ${JWT_REFRESH_SECRET:your-super-secret-refresh-key-change-in-production}
+    expiration-seconds: 3600

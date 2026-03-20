@@ -1,0 +1,83 @@
+# Stack completa: MongoDB (replica set 1 nó) + API Spring — espelha `docker:up` do people-api.
+# Atenção: porta 27017; para só Mongo partilhado com o Nest usa `make docker-dev`.
+services:
+  mongodb:
+    image: mongo:7
+    container_name: people-spring-mongodb
+    restart: unless-stopped
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -e
+        cp /run/mongo-keyfile.in /data/db/mongo-rs.key
+        chmod 400 /data/db/mongo-rs.key
+        chown 999:999 /data/db/mongo-rs.key
+        exec docker-entrypoint.sh mongod --replSet rs0 --bind_ip_all --keyFile /data/db/mongo-rs.key
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: people_db
+    volumes:
+      - spring_people_mongodb_data:/data/db
+      - ./docker/mongo-keyfile:/run/mongo-keyfile.in:ro
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'mongosh',
+          'mongodb://admin:password@127.0.0.1:27017/admin?authSource=admin',
+          '--quiet',
+          '--eval',
+          'db.runCommand({ ping: 1 }).ok',
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  mongo-rs-init:
+    image: mongo:7
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: on-failure:8
+    entrypoint: ['bash', '-lc']
+    command:
+      - |
+        set -e
+        mongosh 'mongodb://admin:password@mongodb:27017/admin?authSource=admin' --quiet --eval '
+        try { rs.status(); } catch (e) {
+          rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongodb:27017" }] });
+        }
+        for (let i = 0; i < 60; i++) {
+          try {
+            const s = rs.status();
+            if (s.members && s.members[0].stateStr === "PRIMARY") { quit(0); }
+          } catch (e) {}
+          sleep(1000);
+        }
+        quit(1);
+        '
+
+  api:
+    build: .
+    container_name: people-spring-api
+    restart: unless-stopped
+    ports:
+      - '3000:3000'
+    environment:
+      DATABASE_URL: mongodb://admin:password@mongodb:27017/people_db?authSource=admin&replicaSet=rs0
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_REFRESH_SECRET: your-super-secret-refresh-key-change-in-production
+      PORT: '3000'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      mongo-rs-init:
+        condition: service_completed_successfully
+
+volumes:
+  spring_people_mongodb_data:
